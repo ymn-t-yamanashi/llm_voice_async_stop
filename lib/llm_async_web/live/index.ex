@@ -36,6 +36,9 @@ defmodule LlmAsyncWeb.Index do
 
     socket =
       assign(socket, btn: true)
+      |> assign(sentences: [])
+      |> assign(old_sentence_count: 1)
+      |> assign(talking_no: 0)
       |> assign(task_pid: nil)
 
     {:noreply, socket}
