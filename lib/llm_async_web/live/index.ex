@@ -9,7 +9,7 @@ defmodule LlmAsyncWeb.Index do
       |> assign(old_sentence_count: 1)
       |> assign(sentences: [])
       |> assign(talking_no: 0)
-      |> assign(task_pid: nil)     # ★ タスクPIDを保持
+      |> assign(task_pid: nil)   # ★ タスクプロセスのPIDを記録
 
     {:ok, socket}
   end
@@ -31,8 +31,7 @@ defmodule LlmAsyncWeb.Index do
 
   def handle_event("stop", _, socket) do
     if socket.assigns.task_pid do
-      # send(socket.assigns.task_pid, :stop)
-      Process.exit(socket.assigns.task_pid, :kill)
+      send(socket.assigns.task_pid, :stop)
     end
 
     socket =
