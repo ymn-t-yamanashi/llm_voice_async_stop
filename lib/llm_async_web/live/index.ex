@@ -40,6 +40,7 @@ defmodule LlmAsyncWeb.Index do
       |> assign(old_sentence_count: 1)
       |> assign(talking_no: 0)
       |> assign(task_pid: nil)
+      |> stop_voice_playback()
 
     {:noreply, socket}
   end
@@ -87,6 +88,10 @@ defmodule LlmAsyncWeb.Index do
       "text" => text,
       "speaker_id" => "1"
     })
+  end
+
+  defp stop_voice_playback(socket) do
+    push_event(socket, "stop_voice_playback", %{})
   end
 
   defp speak_first(socket, _old_sentence_count = 1, _new_sentence_count = 2, sentences) do

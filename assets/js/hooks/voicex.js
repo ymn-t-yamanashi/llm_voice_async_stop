@@ -1,15 +1,27 @@
-
 // VOICEVOX EngineのURL
 const VOICEVOX_URL = "http://localhost:50021"; 
 
 Voicex = {
+    // ⚠️ 新しい状態変数
+    // 現在再生中の <audio> 要素を保持します。
+    currentAudioPlayer: null,
+    // Blob URLを保持し、再生停止または終了時に解放（revoke）するために使用します。
+    currentAudioUrl: null, 
+
     // ライフサイクルコールバック (要素がDOMに追加され、LiveViewと接続された時に実行)
     mounted() {
         // Elixirサーバー側から送信されるイベントをリッスン
-        // イベント名: "synthesize_and_play"
-        // ペイロード: { text: "...", speaker_id: N }
+        // イベント名: "synthesize_and_play" (音声合成と再生の開始)
         this.handleEvent("synthesize_and_play", ({ text, speaker_id }) => {
+            // 新しい再生が開始される前に、もし再生中であれば停止します。
+            this.stopPlayback(); 
             this.speakText(text, speaker_id);
+        });
+
+        // 停止イベントのハンドラ（LiveViewから明示的に停止を指示する場合）
+        // LiveView側で `push_event("stop_voice_playback", %{})` のように呼び出せます。
+        this.handleEvent("stop_voice_playback", () => {
+            this.stopPlayback();
         });
     },
 
@@ -90,18 +102,29 @@ Voicex = {
             // 3. 再生ロジック
             const audioUrl = URL.createObjectURL(wavBlob);
             audioPlayer.src = audioUrl;
-            
+
+            // 状態を更新
+            this.currentAudioPlayer = audioPlayer; 
+            this.currentAudioUrl = audioUrl;
+
             // 4. 再生開始
+            // ブラウザの自動再生ポリシーにより、ユーザー操作がないと失敗する場合があります
             await audioPlayer.play();
 
-            // 5. 再生終了後のクリーンアップ
-            audioPlayer.onended = () => {
-                URL.revokeObjectURL(audioUrl);
-                this.pushEvent("voice_playback_finished", { status: "ok" });
+            // 5. 再生終了/エラー後のクリーンアップ関数を定義
+            const cleanup = () => {
+                // 再生が終了したものが、現在のプレイヤーであることを確認
+                if (this.currentAudioPlayer === audioPlayer) {
+                    URL.revokeObjectURL(audioUrl); // リソース解放
+                    this.currentAudioPlayer = null; // 状態クリア
+                    this.currentAudioUrl = null;
+                    this.pushEvent("voice_playback_finished", { status: "ok" });
+                }
             };
-            audioPlayer.onerror = () => {
-                 URL.revokeObjectURL(audioUrl);
-            };
+            
+            // 再生終了時とエラー時のクリーンアップを設定
+            audioPlayer.onended = cleanup;
+            audioPlayer.onerror = cleanup; 
 
         } catch (error) {
             console.error("致命的なエラーが発生しました:", error.message, error);
@@ -110,11 +133,41 @@ Voicex = {
             if (error.message.includes("Text input is empty")) {
                 console.error("エラー: テキストが入力されていません。");
             } else if (error.name === "NotAllowedError") {
-                console.warn("警告: 再生がブラウザによってブロックされました。");
+                console.warn("警告: 再生がブラウザによってブロックされました (ユーザー操作が必要な場合があります)。");
             } else {
                 console.error(`VOICEVOX Engine 接続エラー: ポート (${VOICEVOX_URL}) を確認してください。`);
             }
+            
+            // エラーが発生した場合も、状態をクリアしておきます
+            this.currentAudioPlayer = null;
+            this.currentAudioUrl = null;
         } 
+    },
+    
+    // --- 4. 停止機能 (新しく追加された関数) ---
+
+    /**
+     * 現在再生中の音声を停止し、関連リソースを解放します。
+     */
+    stopPlayback() {
+        if (this.currentAudioPlayer) {
+            this.currentAudioPlayer.pause(); // 再生を一時停止（停止）
+            this.currentAudioPlayer.currentTime = 0; // 再生位置をリセット
+
+            // 状態とリソースの解放
+            if (this.currentAudioUrl) {
+                URL.revokeObjectURL(this.currentAudioUrl); // Blob URLを解放
+            }
+
+            // 状態をクリア
+            this.currentAudioPlayer = null;
+            this.currentAudioUrl = null;
+            
+            console.log("音声再生を停止しました。");
+            return true;
+        }
+        // console.log("再生中の音声はありませんでした。"); // 頻繁にログが出力されるのを避けるためコメントアウト
+        return false;
     }
 };
 
