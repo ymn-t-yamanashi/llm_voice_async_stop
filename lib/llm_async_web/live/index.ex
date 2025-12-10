@@ -4,23 +4,39 @@ defmodule LlmAsyncWeb.Index do
   def mount(_params, _session, socket) do
     socket =
       assign(socket, text: "実行ボタンを押してください")
-      |> assign(input_text: "Elixirについて一言で教えてください")
+      |> assign(input_text: "Elixirについて教えてください")
       |> assign(btn: true)
       |> assign(old_sentence_count: 1)
       |> assign(sentences: [])
       |> assign(talking_no: 0)
+      |> assign(task_pid: nil)     # ★ タスクPIDを保持
 
     {:ok, socket}
   end
 
   def handle_event("start", _, socket) do
-    pid = self()
+    pid_liveview = self()
     input_text = socket.assigns.input_text
 
     socket =
       assign(socket, btn: false)
       |> assign(text: "")
-      |> assign_async(:ret, fn -> run(pid, input_text) end)
+      |> assign(sentences: [])
+      |> assign(old_sentence_count: 1)
+      |> assign(talking_no: 0)
+      |> assign_async(:ret, fn -> run(pid_liveview, input_text) end)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("stop", _, socket) do
+    if socket.assigns.task_pid do
+      send(socket.assigns.task_pid, :stop)
+    end
+
+    socket =
+      assign(socket, btn: true)
+      |> assign(task_pid: nil)
 
     {:noreply, socket}
   end
@@ -40,6 +56,10 @@ defmodule LlmAsyncWeb.Index do
     {:noreply, socket}
   end
 
+  def handle_info({:task_pid, pid}, socket) do
+    {:noreply, assign(socket, task_pid: pid)}
+  end
+
   def handle_info(%{"done" => false, "response" => response}, %{assigns: assigns} = socket) do
     old_sentence_count = assigns.old_sentence_count
     text = assigns.text <> response
@@ -56,7 +76,7 @@ defmodule LlmAsyncWeb.Index do
   end
 
   def handle_info(%{"done" => true}, socket) do
-    {:noreply, socket}
+    {:noreply, assign(socket, btn: true)}
   end
 
   defp synthesize_and_play(text, socket) do
@@ -84,7 +104,12 @@ defmodule LlmAsyncWeb.Index do
     |> assign(btn: true)
   end
 
-  defp run(pid, text) do
+  defp run(pid_liveview, text) do
+    task_pid = self()
+
+    # LiveView に Task PID を伝える
+    send(pid_liveview, {:task_pid, task_pid})
+
     client = Ollama.init()
 
     {:ok, stream} =
@@ -95,9 +120,20 @@ defmodule LlmAsyncWeb.Index do
       )
 
     stream
-    |> Stream.each(&Process.send(pid, &1, []))
+    |> Stream.transform(nil, fn chunk, acc ->
+      # ★ ノンブロッキングで停止メッセージをチェック
+      receive do
+        :stop ->
+          {:halt, acc}   # ← 優雅に停止
+      after
+        0 ->
+          {[chunk], acc}
+      end
+    end)
+    |> Stream.each(&send(pid_liveview, &1))
     |> Stream.run()
 
+    send(pid_liveview, %{"done" => true})
     {:ok, %{ret: :ok}}
   end
 
@@ -108,9 +144,12 @@ defmodule LlmAsyncWeb.Index do
         <form>
           <textarea id="text_input" name="text" phx-change="update_text" class="input w-[400px]">{@input_text}</textarea>
         </form>
+
         <button disabled={!@btn} class="btn" phx-click="start">実行</button>
-        <div :for={sentence <- @sentences}>
-          {sentence}
+        <button disabled={@btn} class="btn btn-error" phx-click="stop">停止</button>
+
+        <div :for={s <- @sentences}>
+          {s}
         </div>
       </div>
     </Layouts.app>
