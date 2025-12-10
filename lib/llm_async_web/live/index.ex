@@ -9,7 +9,7 @@ defmodule LlmAsyncWeb.Index do
       |> assign(old_sentence_count: 1)
       |> assign(sentences: [])
       |> assign(talking_no: 0)
-      |> assign(task_pid: nil)   # ★ タスクプロセスのPIDを記録
+      |> assign(task_pid: nil)
 
     {:ok, socket}
   end
@@ -31,7 +31,7 @@ defmodule LlmAsyncWeb.Index do
 
   def handle_event("stop", _, socket) do
     if socket.assigns.task_pid do
-      send(socket.assigns.task_pid, :stop)
+      Process.exit(socket.assigns.task_pid, :kill)
     end
 
     socket =
@@ -108,11 +108,12 @@ defmodule LlmAsyncWeb.Index do
   end
 
   defp run(pid_liveview, text) do
-    task_pid = self()
-
-    # LiveView に Task PID を伝える
+    {_, task_pid} = Task.start_link(fn -> run_ollama(pid_liveview, text) end)
     send(pid_liveview, {:task_pid, task_pid})
+    {:ok, %{ret: :ok}}
+  end
 
+  def run_ollama(pid_liveview, text) do
     client = Ollama.init()
 
     {:ok, stream} =
@@ -123,21 +124,10 @@ defmodule LlmAsyncWeb.Index do
       )
 
     stream
-    |> Stream.transform(nil, fn chunk, acc ->
-      # ★ ノンブロッキングで停止メッセージをチェック
-      receive do
-        :stop ->
-          {:halt, acc}   # ← 優雅に停止
-      after
-        0 ->
-          {[chunk], acc}
-      end
-    end)
     |> Stream.each(&send(pid_liveview, &1))
     |> Stream.run()
 
     send(pid_liveview, %{"done" => true})
-    {:ok, %{ret: :ok}}
   end
 
   def render(assigns) do
