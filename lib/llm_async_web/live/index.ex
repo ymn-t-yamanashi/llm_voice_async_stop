@@ -139,7 +139,7 @@ defmodule LlmAsyncWeb.Index do
         </form>
 
         <button disabled={!@btn} class="btn" phx-click="start">実行</button>
-        <button disabled={@btn} class="btn btn-error" phx-click="stop">停止</button>
+        <button class="btn btn-error" phx-click="stop">停止</button>
 
         <div :for={s <- @sentences}>
           {s}
