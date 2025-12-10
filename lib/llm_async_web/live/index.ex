@@ -31,7 +31,8 @@ defmodule LlmAsyncWeb.Index do
 
   def handle_event("stop", _, socket) do
     if socket.assigns.task_pid do
-      send(socket.assigns.task_pid, :stop)
+      # send(socket.assigns.task_pid, :stop)
+      Process.exit(socket.assigns.task_pid, :kill)
     end
 
     socket =
